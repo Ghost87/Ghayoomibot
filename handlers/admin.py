@@ -201,7 +201,7 @@ async def cb_cancel(cb: CallbackQuery, state: FSMContext) -> None:
             u = await db.get_user(int(parts[1]))
             if u:
                 rc = await db.count_user_resumes(u[0])
-                await _edit(cb, _user_card_text(u, rc), akb.user_card_kb(u[0], int(parts[2])))
+                await _edit(cb, await _user_card_text(u, rc, u[0]), akb.user_card_kb(u[0], int(parts[2])))
             else:
                 await _render_users(cb, 0)
         elif route == "users":
@@ -377,12 +377,16 @@ async def cb_csv(cb: CallbackQuery) -> None:
 async def cb_csv_users(cb: CallbackQuery) -> None:
     if not await _guard(cb):
         return
-    rows = await db.list_users(0, 100000)
+    rows = await db.list_users_with_profiles(0, 100000)
     doc = _csv_doc(
-        ["user_id", "username", "first_name", "last_name", "first_seen", "last_seen"],
+        ["user_id", "username", "first_name", "last_name", "first_seen", "last_seen",
+         "is_blocked", "reg_phone", "reg_fullname", "reg_grade", "reg_major",
+         "reg_province", "registered_at"],
         rows, f"users_{datetime.now():%Y%m%d_%H%M}.csv",
     )
-    await cb.message.answer_document(doc, caption=f"👥 CSV کاربران — {len(rows)} ردیف")
+    await cb.message.answer_document(
+        doc, caption=f"👥 CSV کامل کاربران (+پروفایل ثبت‌نامی) — {len(rows)} ردیف"
+    )
     await cb.answer("📥 ارسال شد")
 
 
@@ -518,20 +522,36 @@ async def _show_custom_q(cb: CallbackQuery, key: str) -> None:
     await _edit(cb, f"⭐ سؤال سفارشی {9 + idx + 1} فرم\n{SEP}\n{cq['text']}", akb.custom_question_kb(key))
 
 
-def _user_card_text(u: tuple, resumes_count: int) -> str:
+async def _user_card_text(u: tuple, resumes_count: int, user_id: int) -> str:
     uid, username, first_name, last_name, first_seen, last_seen = u
     name = f"{first_name or ''} {last_name or ''}".strip() or "—"
-    return "\n".join([
+    lines = [
         "👤 کارت کاربر",
         SEP,
         f"🪪 نام: {name}",
         f"🔗 یوزرنیم: {'@' + username if username else '—'}",
         f"🆔 آیدی عددی: {uid}",
         f"📄 رزومه‌ها: {resumes_count}",
+    ]
+    prof = await db.get_profile(user_id)
+    if prof:
+        lines += [
+            SEP,
+            "📇 **پروفایل ثبت‌نامی**",
+            f"📱 شماره: {prof.get('phone') or '—'}",
+            f"🪪 نام کامل: {prof.get('fullname') or '—'}",
+            f"🎓 پایه: {prof.get('grade') or '—'}",
+            f"📚 رشته: {prof.get('major') or '—'}",
+            f"🌐 استان: {prof.get('province') or '—'}",
+        ]
+    else:
+        lines += [SEP, "📇 ثبت‌نام: انجام نشده ❌"]
+    lines += [
         SEP,
         f"📅 اولین ورود: {first_seen or '—'}",
         f"🕓 آخرین بازدید: {last_seen or '—'}",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 @router.callback_query(F.data.startswith("ap:uc:show:"))
@@ -545,7 +565,7 @@ async def cb_user_card(cb: CallbackQuery) -> None:
         await cb.answer("⚠️ کاربر پیدا نشد (شاید حذف شده).", show_alert=True)
         return
     rc = await db.count_user_resumes(uid)
-    await _edit(cb, _user_card_text(u, rc), akb.user_card_kb(uid, page))
+    await _edit(cb, await _user_card_text(u, rc, uid), akb.user_card_kb(uid, page))
     await cb.answer()
 
 

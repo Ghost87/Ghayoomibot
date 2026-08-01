@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS settings (
     key         TEXT PRIMARY KEY,
     value       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS profiles (
+    user_id     INTEGER PRIMARY KEY,
+    phone       TEXT,
+    fullname    TEXT,
+    grade       TEXT,
+    major       TEXT,
+    province    TEXT,
+    registered_at TEXT
+);
 """
 
 RESUME_FIELDS = (
@@ -54,6 +64,49 @@ RESUME_FIELDS = (
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ─────────────── پروفایل ثبت‌نام کاربر ───────────────
+PROFILE_FIELDS = ("phone", "fullname", "grade", "major", "province")
+
+
+async def get_profile(user_id: int) -> dict | None:
+    """دیکشنری پروفایل کاربر یا None اگر ثبت‌نام نکرده باشد."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT user_id, phone, fullname, grade, major, province, registered_at "
+            "FROM profiles WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cur.fetchone()
+    if not row:
+        return None
+    keys = ("user_id",) + PROFILE_FIELDS + ("registered_at",)
+    return dict(zip(keys, row))
+
+
+async def is_registered(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT 1 FROM profiles WHERE user_id = ?", (user_id,))).fetchone()
+    return row is not None
+
+
+async def set_profile_field(user_id: int, field: str, value: str) -> None:
+    """ذخیره‌ی یک فیلد پروفایل — سطر را در صورت نبود می‌سازد."""
+    if field not in PROFILE_FIELDS:
+        raise ValueError(f"فیلد نامعتبر: {field}")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO profiles (user_id, registered_at) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO NOTHING",
+            (user_id, _now()),
+        )
+        await db.execute(
+            f"UPDATE profiles SET {field} = ? WHERE user_id = ?",
+            (value, user_id),
+        )
+        await db.commit()
 
 
 # ─────────────────────────────── init ────────────────────────────────
@@ -95,6 +148,20 @@ async def list_users(offset: int = 0, limit: int = 8) -> list[tuple]:
         cur = await db.execute(
             "SELECT user_id, username, first_name, last_name, first_seen, last_seen FROM users "
             "ORDER BY rowid DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
+        return await cur.fetchall()
+
+
+async def list_users_with_profiles(offset: int = 0, limit: int = 100) -> list[tuple]:
+    """کاربران + پروفایل ثبت‌نامی (LEFT JOIN) — برای خروجی CSV کامل."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT u.user_id, u.username, u.first_name, u.last_name, "
+            "u.first_seen, u.last_seen, u.is_blocked, "
+            "p.phone, p.fullname, p.grade, p.major, p.province, p.registered_at "
+            "FROM users u LEFT JOIN profiles p ON p.user_id = u.user_id "
+            "ORDER BY u.rowid DESC LIMIT ? OFFSET ?",
             (limit, offset),
         )
         return await cur.fetchall()
@@ -288,9 +355,10 @@ async def reset_db() -> str:
 
 # ───────────────────── ابزارهای پنل حرفه‌ای (جدید) ─────────────────────
 async def delete_user(user_id: int) -> bool:
-    """حذف یک کاربر از جدول users (رزومه‌ها برای آرشیو CSV باقی می‌مانند)."""
+    """حذف یک کاربر از users + پروفایلش (رزومه‌ها برای آرشیو CSV باقی می‌مانند)."""
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM profiles WHERE user_id = ?", (user_id,))
         await db.commit()
         return cur.rowcount > 0
 
@@ -308,5 +376,6 @@ async def wipe_history() -> tuple[int, int]:
         r = await (await db.execute("SELECT COUNT(*) FROM resumes")).fetchone()
         await db.execute("DELETE FROM users")
         await db.execute("DELETE FROM resumes")
+        await db.execute("DELETE FROM profiles")
         await db.commit()
         return (u[0], r[0])

@@ -6,7 +6,7 @@ UX ربات اصلی: پاسخ‌ها به‌صورت «پیام جدید» ار
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, ReplyKeyboardRemove
 
 import config
 from keyboards.contact import contact_us_kb
@@ -26,6 +26,10 @@ router = Router(name="menu")
 
 @router.callback_query(F.data == "back_to_main")
 async def cb_back_to_main(callback: CallbackQuery, state: FSMContext) -> None:
+    prev_state = await state.get_state()
+    if prev_state and prev_state.startswith(("RegistrationFSM:", "ProfileEditFSM:")):
+        # اگر وسط ثبت‌نام/ویرایش پروفایل بود، کیبورد ریپلای هم پاک شود
+        await callback.message.answer("↩️ برگشتی به منوی اصلی.", reply_markup=ReplyKeyboardRemove())
     await state.clear()
     promos = await content.get_promos()
     await callback.message.answer(
