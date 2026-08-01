@@ -32,8 +32,8 @@ jobs:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-      ADMIN_USER_IDS: ${{ vars.ADMIN_USER_IDS }}
-      ADMIN_GROUP_ID: ${{ vars.ADMIN_GROUP_ID }}
+      ADMIN_USER_IDS: ${{ secrets.ADMIN_USER_IDS || vars.ADMIN_USER_IDS }}
+      ADMIN_GROUP_ID: ${{ secrets.ADMIN_GROUP_ID || vars.ADMIN_GROUP_ID }}
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
       - name: 📥 دانلود کد
