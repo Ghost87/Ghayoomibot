@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, User
 
 import config
 from keyboards.join import join_lock_kb
+from handlers.menu import edit_or_answer
 from handlers.registration import start_registration
 from keyboards.main_menu import main_menu_kb
 from services import content
@@ -72,7 +73,9 @@ async def cb_check_join(callback: CallbackQuery, bot: Bot, state: FSMContext) ->
         return
 
     promos = await content.get_promos()
-    await callback.message.answer(
+    # پیام جوین‌لاک همان‌جا به منوی اصلی تبدیل می‌شود — ناوبری تک‌پیامی
+    await edit_or_answer(
+        callback,
         config.MESSAGES["START_WELCOME"].format(first_name=_first_name(callback.from_user)),
         reply_markup=main_menu_kb(promos),
     )

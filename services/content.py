@@ -34,6 +34,10 @@ DEFAULT_CONTACT_BUTTONS: list[dict] = [
     {"text": "اینستاگرام استاد قیومی", "type": "url", "value": config.LINK_INSTAGRAM, "row": 4},
     {"text": "پشتیبانی آنلاین کاربران", "type": "webapp",
      "value": config.WEBAPP_URLS["online_support"], "row": 5},
+    {"text": "📣 کانال رسمی آکادمی آریامیر", "type": "url",
+     "value": "https://t.me/Ariamir_academy", "row": 6},
+    {"text": "👤 ارتباط مستقیم با آریامیر (مدیریت)", "type": "url",
+     "value": "https://t.me/ARIAMIR_IR", "row": 7},
 ]
 
 _QUESTION_KEYS = list(config.FSM_QUESTIONS.keys())

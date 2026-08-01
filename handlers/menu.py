@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """هندلرهای منوی اصلی و زیرمنوها — محتوا از دیتابیس (قابل ویرایش با پنل ادمین).
 
-UX ربات اصلی: پاسخ‌ها به‌صورت «پیام جدید» ارسال می‌شوند (نه ویرایش).
+UX: ناوبری «عقب/جلو» روی همان پیام انجام می‌شود (edit) نه پیام جدید؛
+فقط جاهایی که پیام قابل ویرایش نیست (مثل سند) پیام تازه می‌آید.
 """
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 import config
 from keyboards.contact import contact_us_kb
@@ -24,15 +26,33 @@ from services import content
 router = Router(name="menu")
 
 
+async def edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None, **kwargs) -> None:
+    """ناوبری روی همان پیام؛ اگر قابل ویرایش نبود (مثل پیام حاوی فایل)، پیام جدید."""
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup, **kwargs)
+    except TelegramBadRequest:
+        await callback.message.answer(text, reply_markup=reply_markup, **kwargs)
+
+
+async def flash_message(bot: Bot, chat_id: int, text: str) -> None:
+    """ارسال پیام موقت با حذف کیبورد ریپلای و پاک‌کردن خود پیام — چت تمیز می‌ماند."""
+    m = await bot.send_message(chat_id, text, reply_markup=ReplyKeyboardRemove())
+    try:
+        await bot.delete_message(chat_id, m.message_id)
+    except TelegramBadRequest:
+        pass
+
+
 @router.callback_query(F.data == "back_to_main")
-async def cb_back_to_main(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_back_to_main(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     prev_state = await state.get_state()
-    if prev_state and prev_state.startswith(("RegistrationFSM:", "ProfileEditFSM:")):
-        # اگر وسط ثبت‌نام/ویرایش پروفایل بود، کیبورد ریپلای هم پاک شود
-        await callback.message.answer("↩️ برگشتی به منوی اصلی.", reply_markup=ReplyKeyboardRemove())
     await state.clear()
     promos = await content.get_promos()
-    await callback.message.answer(
+    if prev_state and prev_state.startswith(("RegistrationFSM:", "ProfileEditFSM:")):
+        # وسط ثبت‌نام/ویرایش بود: کیبورد ریپلای پاک شود (پیام موقت، خودش پاک می‌شود)
+        await flash_message(bot, callback.message.chat.id, "↩️ برگشتی به منوی اصلی.")
+    await edit_or_answer(
+        callback,
         config.MESSAGES["START_WELCOME"].format(first_name=callback.from_user.first_name or "کاربر"),
         reply_markup=main_menu_kb(promos),
     )
@@ -49,40 +69,42 @@ async def cb_promo_view(callback: CallbackQuery) -> None:
         await callback.answer("این دکمه دیگر موجود نیست 🙁", show_alert=True)
         return
     if promo.get("file_id"):
+        # فایل باید پیام جدید باشد — دکمه بازگشتش با edit_or_answer به منو برمی‌گردد
         await callback.message.answer_document(
             promo["file_id"], caption=promo["body"], reply_markup=promo_links_kb(promo)
         )
     else:
-        await callback.message.answer(promo["body"], reply_markup=promo_links_kb(promo))
+        await edit_or_answer(callback, promo["body"], reply_markup=promo_links_kb(promo))
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu_user_info")
 async def cb_user_info(callback: CallbackQuery) -> None:
-    await callback.message.answer(config.MESSAGES["USER_INFO_TEXT"], reply_markup=user_info_kb())
+    await edit_or_answer(callback, config.MESSAGES["USER_INFO_TEXT"], reply_markup=user_info_kb())
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu_anonymous_msg")
 async def cb_anonymous_msg(callback: CallbackQuery) -> None:
     # ستاره‌های متن در ربات اصلی حروفی نمایش داده می‌شوند — بدون parse_mode
-    await callback.message.answer(config.MESSAGES["ANONYMOUS_MSG_TEXT"], reply_markup=anonymous_msg_kb())
+    await edit_or_answer(callback, config.MESSAGES["ANONYMOUS_MSG_TEXT"], reply_markup=anonymous_msg_kb())
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu_invite_friends")
-async def cb_invite_friends(callback: CallbackQuery) -> None:
-    bot_me = await callback.bot.get_me()
+async def cb_invite_friends(callback: CallbackQuery, bot: Bot) -> None:
+    bot_me = await bot.get_me()
     bot_link = f"https://t.me/{bot_me.username}"
     text = config.MESSAGES["INVITE_FRIENDS_TEXT"].format(bot_link=bot_link)
-    await callback.message.answer(text, reply_markup=invite_friends_kb(bot_me.username), disable_web_page_preview=True)
+    await edit_or_answer(callback, text, reply_markup=invite_friends_kb(bot_me.username),
+                         disable_web_page_preview=True)
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu_contact_us")
 async def cb_contact_us(callback: CallbackQuery) -> None:
     items = await content.get_contact_buttons()
-    await callback.message.answer(config.MESSAGES["CONTACT_US_TEXT"], reply_markup=contact_us_kb(items))
+    await edit_or_answer(callback, config.MESSAGES["CONTACT_US_TEXT"], reply_markup=contact_us_kb(items))
     await callback.answer()
 
 
@@ -101,5 +123,5 @@ async def cb_contact_alert(callback: CallbackQuery) -> None:
 async def cb_menu_cooperation(callback: CallbackQuery, state: FSMContext) -> None:
     """نمایش متن فراخوان همکاری + دکمه «ارسال رزومه»."""
     await state.clear()
-    await callback.message.answer(config.MESSAGES["COOP_CALL_TEXT"], reply_markup=coop_intro_kb())
+    await edit_or_answer(callback, config.MESSAGES["COOP_CALL_TEXT"], reply_markup=coop_intro_kb())
     await callback.answer()

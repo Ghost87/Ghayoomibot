@@ -12,10 +12,12 @@
 import re
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 import config
+from handlers.menu import edit_or_answer, flash_message
 from keyboards.main_menu import main_menu_kb
 from keyboards.registration import (
     CANCEL_EDIT_BTN,
@@ -49,14 +51,6 @@ def _norm_phone(raw: str) -> str | None:
     if digits.startswith("9") and len(digits) == 10:
         digits = "0" + digits
     return digits if len(digits) == 11 and digits.startswith("09") else None
-
-
-async def _show_menu(message: Message) -> None:
-    promos = await content.get_promos()
-    await message.answer(
-        config.MESSAGES["START_WELCOME"].format(first_name="عزیز"),
-        reply_markup=main_menu_kb(promos),
-    )
 
 
 # ═══════════════════ فلوی ثبت‌نام (زنجیره‌ای) ═══════════════════
@@ -142,9 +136,10 @@ async def reg_province(cb: CallbackQuery, state: FSMContext) -> None:
     province = cb.data.split(":", 2)[-1]
     await db.set_profile_field(cb.from_user.id, "province", province)
     await state.clear()
-    await cb.message.edit_text(config.REG_DONE)
+    promos = await content.get_promos()
+    # اتمام ثبت‌نام + منوی اصلی روی همان پیام — ناوبری تک‌پیامی
+    await cb.message.edit_text(config.REG_DONE, reply_markup=main_menu_kb(promos))
     await cb.answer(f"استان: {province} ✅")
-    await _show_menu(cb.message)
 
 
 # ═══════════════════ پروفایل (سمت کاربر) ═══════════════════
@@ -167,7 +162,7 @@ async def cb_user_profile(cb: CallbackQuery, state: FSMContext) -> None:
     if not p:
         await cb.answer("هنوز ثبت‌نام نکردی!", show_alert=True)
         return
-    await cb.message.answer(_profile_text(p), reply_markup=profile_home_kb())
+    await edit_or_answer(cb, _profile_text(p), reply_markup=profile_home_kb())
     await cb.answer()
 
 
@@ -205,9 +200,10 @@ async def pedit_ask(cb: CallbackQuery, state: FSMContext) -> None:
     if kb is None:
         await cb.answer("خطا!", show_alert=True)
         return
-    if st:  # state-based (phone/name) — پیام جدید با کیبورد ریپلای
+    if st:  # state-based (phone/name) — پیام جدید با کیبورد ریپلای (آیدی‌اش را نگه می‌داریم)
         await state.set_state(st)
-        await cb.message.answer(text, reply_markup=kb)
+        sent = await cb.message.answer(text, reply_markup=kb)
+        await state.update_data(prompt_msg_id=sent.message_id)
     else:   # inline-based (grade/major/province) — ویرایش همین پیام
         await cb.message.edit_text(text, reply_markup=kb)
     await cb.answer()
@@ -247,7 +243,7 @@ async def _back_to_profile_card(cb: CallbackQuery) -> None:
 
 # ─────────── ویرایش شماره (state-based) ───────────
 @router.message(ProfileEditFSM.editing_phone, F.contact)
-async def pedit_phone_contact(message: Message, state: FSMContext) -> None:
+async def pedit_phone_contact(message: Message, state: FSMContext, bot: Bot) -> None:
     if message.contact.user_id != message.from_user.id:
         await message.answer(
             "⚠️ لطفاً شماره‌ی خودت رو بفرست!",
@@ -258,19 +254,19 @@ async def pedit_phone_contact(message: Message, state: FSMContext) -> None:
     if not phone:
         await message.answer(config.REG_PHONE_BAD, reply_markup=share_phone_kb(with_cancel=True))
         return
-    await _finish_edit(message, state, "phone", phone, "شماره تماس")
+    await _finish_edit(bot, message, state, "phone", phone, "شماره تماس")
 
 
 @router.message(ProfileEditFSM.editing_phone, F.text)
-async def pedit_phone_text(message: Message, state: FSMContext) -> None:
+async def pedit_phone_text(message: Message, state: FSMContext, bot: Bot) -> None:
     if (message.text or "").strip() == CANCEL_EDIT_BTN:
-        await _cancel_edit(message, state)
+        await _cancel_edit(bot, message, state)
         return
     phone = _norm_phone(message.text or "")
     if not phone:
         await message.answer(config.REG_PHONE_BAD, reply_markup=share_phone_kb(with_cancel=True))
         return
-    await _finish_edit(message, state, "phone", phone, "شماره تماس")
+    await _finish_edit(bot, message, state, "phone", phone, "شماره تماس")
 
 
 @router.message(ProfileEditFSM.editing_phone)
@@ -280,9 +276,9 @@ async def pedit_phone_other(message: Message, state: FSMContext) -> None:
 
 # ─────────── ویرایش نام (state-based) ───────────
 @router.message(ProfileEditFSM.editing_name, F.text)
-async def pedit_name(message: Message, state: FSMContext) -> None:
+async def pedit_name(message: Message, state: FSMContext, bot: Bot) -> None:
     if (message.text or "").strip() == CANCEL_EDIT_BTN:
-        await _cancel_edit(message, state)
+        await _cancel_edit(bot, message, state)
         return
     name = (message.text or "").strip()
     if len(name) < 3 or len(name) > 60:
@@ -291,7 +287,7 @@ async def pedit_name(message: Message, state: FSMContext) -> None:
             reply_markup=cancel_edit_kb(),
         )
         return
-    await _finish_edit(message, state, "fullname", name, "نام")
+    await _finish_edit(bot, message, state, "fullname", name, "نام")
 
 
 @router.message(ProfileEditFSM.editing_name)
@@ -300,23 +296,37 @@ async def pedit_name_other(message: Message, state: FSMContext) -> None:
 
 
 # ─────────── اتمام/انصراف ویرایش ───────────
-async def _finish_edit(message: Message, state: FSMContext, field: str, value: str, label: str) -> None:
-    """ذخیره + پاک‌کردن کیبورد + نمایش کارت پروفایل آپدیت‌شده."""
+async def _show_card_after_reply_flow(bot: Bot, message: Message, state: FSMContext) -> None:
+    """بعد از پایان فلوی متنی ویرایش: کارت پروفایل روی «همان پیام پرامپت» ادیت می‌شود."""
+    data = await state.get_data()
+    prompt_id = data.get("prompt_msg_id")
+    p = await db.get_profile(message.from_user.id)
+    if not p:
+        return
+    if prompt_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=prompt_id,
+                text=_profile_text(p),
+                reply_markup=profile_home_kb(),
+            )
+            return
+        except TelegramBadRequest:
+            pass
+    await message.answer(_profile_text(p), reply_markup=profile_home_kb())
+
+
+async def _finish_edit(bot: Bot, message: Message, state: FSMContext, field: str, value: str, label: str) -> None:
+    """ذخیره + پاک‌کردن کیبورد (پیام موقت) + کارت پروفایل روی همان پیام پرامپت."""
     await db.set_profile_field(message.from_user.id, field, value)
+    await flash_message(bot, message.chat.id, f"✅ {label} با موفقیت ویرایش شد!")
+    await _show_card_after_reply_flow(bot, message, state)
     await state.clear()
-    await message.answer(
-        f"✅ {label} با موفقیت ویرایش شد!",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    p = await db.get_profile(message.from_user.id)
-    if p:
-        await message.answer(_profile_text(p), reply_markup=profile_home_kb())
 
 
-async def _cancel_edit(message: Message, state: FSMContext) -> None:
+async def _cancel_edit(bot: Bot, message: Message, state: FSMContext) -> None:
     """انصراف — کیبورد «📱 ارسال شماره»/«انصراف» حذف و کارت پروفایل برمی‌گردد."""
+    await flash_message(bot, message.chat.id, "✖️ ویرایش لغو شد.")
+    await _show_card_after_reply_flow(bot, message, state)
     await state.clear()
-    await message.answer("✖️ ویرایش لغو شد.", reply_markup=ReplyKeyboardRemove())
-    p = await db.get_profile(message.from_user.id)
-    if p:
-        await message.answer(_profile_text(p), reply_markup=profile_home_kb())
