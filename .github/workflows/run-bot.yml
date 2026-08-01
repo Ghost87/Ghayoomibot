@@ -1,0 +1,181 @@
+name: 🤖 Run GhayoomiBot
+
+# ──────────────────────────────────────────────────────────────
+#  روش استفاده: تب Actions → 🤖 Run GhayoomiBot → Run workflow
+#  ورودی «minutes» = چند دقیقه ربات آنلاین بمونه (۱ تا ۳۵۶)
+# ──────────────────────────────────────────────────────────────
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "⏱ چند دقیقه ربات آنلاین باشه؟ (۱ تا ۳۵۶)"
+        required: true
+        default: 15
+        type: number
+
+# اگه یه Run جدید بزنی، قبلی لغو می‌شه (جلوگیری از تداخل پولینگ تلگرام)
+concurrency:
+  group: run-ghayoomibot
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # برای ذخیره دیتابیس در برنچ db-backup بین اجراها
+
+jobs:
+  run:
+    name: 🚀 آنلاین کردن ربات
+    runs-on: ubuntu-latest
+    # سقف هر Job شش ساعته — زمان دقیق اجرا داخل استپ با timeout اعمال می‌شه
+    # (اکسپرشن‌های گیت‌هاب عملگر ریاضی ندارن، پس عدد ثابت)
+    timeout-minutes: 360
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      ADMIN_USER_IDS: ${{ vars.ADMIN_USER_IDS }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+    steps:
+      - name: 📥 دانلود کد
+        uses: actions/checkout@v5
+
+      - name: 🗄 بازیابی دیتابیس از اجرای قبلی (پایداری تغییرات)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          if curl -sfL -H "Authorization: Bearer $GH_TOKEN" \
+             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/db-backup/data/bot.db" \
+             -o data/bot.db && [ -s data/bot.db ]; then
+            echo "✅ دیتابیس اجرای قبلی بازیابی شد — تنظیمات پنل حفظ می‌ماند 🎉"
+          else
+            echo "🆕 دیتابیسی از قبل نیست (اولین اجرا) — دیتابیس تازه ساخته می‌شود"
+            rm -f data/bot.db
+          fi
+
+      - name: 🐍 نصب پایتون
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: ⏱ اعتبارسنجی زمان
+        run: |
+          MIN="${{ github.event.inputs.minutes || '15' }}"
+          if ! [[ "$MIN" =~ ^[0-9]+$ ]] || [ "$MIN" -lt 1 ] || [ "$MIN" -gt 356 ]; then
+            echo "::error::⏱ زمان باید بین ۱ تا ۳۵۶ دقیقه باشه (سقف هر Job شش ساعته)"
+            exit 1
+          fi
+          echo "MINUTES=$MIN" >> "$GITHUB_ENV"
+          echo "✅ ربات برای **$MIN دقیقه** آنلاین می‌شه"
+
+      - name: 🖥 نمایش ظرفیت رانر
+        run: |
+          echo "┌─ 🖥 ظرفیت رانر GitHub ─────────────"
+          echo "│ ⚙️  CPU: $(nproc) هسته"
+          free -h | awk '/^Mem:/{print "│ 🧠 RAM: " $2 " (آزاد: " $7 ")"}'
+          df -h / | awk 'NR==2{print "│ 💾 دیسک: " $2 " (آزاد: " $4 ")"}'
+          echo "└─────────────────────────────────"
+          {
+            echo "### 🖥 ظرفیت رانر GitHub"
+            echo "| مورد | مقدار |"
+            echo "|---|---|"
+            echo "| ⚙️ CPU | $(nproc) هسته |"
+            free -h | awk '/^Mem:/{print "| 🧠 RAM | " $2 " |"}'
+            df -h / | awk 'NR==2{print "| 💾 دیسک | " $2 " (آزاد: " $4 ") |"}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 💳 بررسی اعتبار و دقیقه‌های رایگان Actions
+        run: |
+          echo "┌─ 💳 اعتبار GitHub Actions ─────────"
+          if [ -n "$GH_PAT" ]; then
+            RESP=$(curl -s -H "Authorization: Bearer $GH_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/users/Ariamircreation/settings/billing/actions)
+            INCLUDED=$(echo "$RESP" | jq -r '.included_minutes // empty')
+            if [ -n "$INCLUDED" ]; then
+              USED=$(echo "$RESP" | jq -r '.total_minutes_used')
+              PAID=$(echo "$RESP" | jq -r '.total_paid_minutes_used')
+              REM=$(jq -n "$INCLUDED - $USED")
+              PCT=$(jq -n "($USED * 100 / $INCLUDED) | floor")
+              UBUNTU=$(echo "$RESP" | jq -r '.minutes_used_breakdown.UBUNTU // 0')
+              echo "│ 📊 سقف دقیقه رایگان این ماه: $INCLUDED"
+              echo "│ 🔥 مصرف‌شده تا این لحظه: $USED  (⌚ لینوکس: $UBUNTU)"
+              echo "│ ✅ باقی‌مانده: $REM دقیقه (~ $PCT٪ مصرف شده)"
+              echo "│ 💰 دقیقه‌های پولی: $PAID"
+              {
+                echo "### 💳 اعتبار GitHub Actions این ماه"
+                echo "| مورد | مقدار |"
+                echo "|---|---|"
+                echo "| 📊 سقف رایگان | $INCLUDED دقیقه |"
+                echo "| 🔥 مصرف‌شده | $USED دقیقه |"
+                echo "| ✅ باقی‌مانده | **$REM دقیقه** |"
+                echo "| 🚀 این اجرا | ${{ env.MINUTES }} دقیقه |"
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "│ ⚠️ بیلینگ خونده نشد! اسکوپ توکن GH_PAT رو چک کن (read:user + repo)"
+              echo "$RESP" | head -c 300
+            fi
+          else
+            echo "│ ℹ️ سکرت GH_PAT ست نشده — اعداد پیش‌فرض پلن رایگان:"
+            echo "│ 📊 ماهانه 2000 دقیقه رایگان برای ریپوی Private"
+            echo "│ ⚖️ ضریب مصرف: لینوکس×۱ | ویندوز×۲ | مک×۱۰"
+          fi
+          echo "│ 🚀 این اجرا: ${{ env.MINUTES }} دقیقه (لینوکس = ×۱)"
+          echo "└─────────────────────────────────"
+
+      - name: 📦 نصب وابستگی‌ها
+        run: pip install -q --disable-pip-version-check -r requirements.txt
+
+      - name: 🔍 چک سکرت‌ها
+        run: |
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "::error::🔑 سکرت BOT_TOKEN ست نشده! برو: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          echo "✅ BOT_TOKEN موجوده"
+          [ -n "$ADMIN_USERNAME" ] && echo "✅ ADMIN_USERNAME موجوده" || echo "ℹ️ ADMIN_USERNAME ست نشده (پیش‌فرض config استفاده می‌شه)"
+
+      - name: 🤖 اجرای ربات
+        run: |
+          echo "🟢 قیومی‌بات روشن شد — ${MINUTES} دقیقه در خدمته..."
+          timeout "${MINUTES}m" python -u bot.py 2>&1 | tee bot_run.log
+          echo "🏁 پایان زمان اجرا (timeout) — ربات تمیز خاموش شد"
+          exit 0
+
+      - name: 📊 گزارش مصرف این اجرا
+        if: always()
+        run: |
+          echo "⏱ این اجرا ${MINUTES:-0} دقیقه از سهمیه ماهانه‌ات استفاده کرد (لینوکس = ضریب ×۱)"
+          echo "- ⏱ مصرف این اجرا: **${MINUTES:-0} دقیقه** (لینوکس ×۱)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 💾 ذخیره دیتابیس در برنچ db-backup (پایداری بین اجراها)
+        if: always()
+        run: |
+          if [ ! -f data/bot.db ]; then echo "⏭ دیتابیسی برای ذخیره نیست"; exit 0; fi
+          TMP=$(mktemp -d)
+          mkdir -p "$TMP/data" && cp data/bot.db "$TMP/data/bot.db"
+          cd "$TMP"
+          git init -q -b db-backup .
+          git config user.name "ghayoomibot[actions]"
+          git config user.email "ghayoomibot@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q origin db-backup 2>/dev/null && git reset -q --soft origin/db-backup || true
+          git add data/bot.db
+          if git commit -q -m "💾 بکاپ دیتابیس — $(date -u +'%Y-%m-%d %H:%M:%S') UTC"; then
+            git push -q origin db-backup && echo "✅ دیتابیس برای اجرای بعدی ذخیره شد"
+            echo "- 💾 دیتابیس در برنچ db-backup ذخیره شد (اجرای بعدی همین بازمی‌گردد)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ℹ️ تغییری در دیتابیس نبود"
+          fi
+
+      - name: 📤 ذخیره دیتابیس و لاگ (آرتیفکت)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghayoomibot-data
+          path: |
+            data/bot.db
+            bot_run.log
+          if-no-files-found: ignore
+          retention-days: 30
