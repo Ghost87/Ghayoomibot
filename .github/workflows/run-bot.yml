@@ -12,6 +12,11 @@ on:
         required: true
         default: 15
         type: number
+      wipe_db:
+        description: "🗑 دیتابیس پاک بشه؟ (برای تست از صفر — پیش‌فرض: نه)"
+        required: false
+        default: false
+        type: boolean
 
 # اگه یه Run جدید بزنی، قبلی لغو می‌شه (جلوگیری از تداخل پولینگ تلگرام)
 concurrency:
@@ -44,6 +49,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p data
+          if [ "${{ github.event.inputs.wipe_db }}" = "true" ]; then
+            echo "🗑 گزینه wipe_db روشن است — دیتابیس قبلی بازیابی نمی‌شود؛ از صفر شروع می‌کنیم"
+            rm -f data/bot.db
+            exit 0
+          fi
           if curl -sfL -H "Authorization: Bearer $GH_TOKEN" \
              "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/db-backup/data/bot.db" \
              -o data/bot.db && [ -s data/bot.db ]; then

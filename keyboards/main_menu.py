@@ -49,12 +49,13 @@ def promo_links_kb(promo: dict | None = None) -> InlineKeyboardMarkup:
 
 
 def user_info_kb() -> InlineKeyboardMarkup:
-    """کیبورد اطلاعات کاربری — ویرایش مشخصات + پنل دانش‌آموزی (مینی‌اپ)."""
+    """کیبورد اطلاعات کاربری — ویرایش مشخصات + پنل دانش‌آموزی (مینی‌اپ) + پروفایل."""
     kb = InlineKeyboardBuilder()
     kb.button(text="👤 ویرایش مشخصات من", web_app=WebAppInfo(url=config.WEBAPP_URLS["profile_edit"]))
     kb.button(text="🖥 ورود به پنل دانش‌آموزی", web_app=WebAppInfo(url=config.WEBAPP_URLS["student_panel"]))
+    kb.button(text="📇 پروفایل من (ثبت‌نام)", callback_data="menu_user_profile")
     kb.button(text=BACK_BTN_TEXT, callback_data="back_to_main")
-    kb.adjust(2, 1)
+    kb.adjust(2, 1, 1)
     return kb.as_markup()
 
 

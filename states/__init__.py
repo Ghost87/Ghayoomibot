@@ -3,5 +3,6 @@
 
 from .admin import AdminStates
 from .cooperation import CooperationFSM
+from .registration import ProfileEditFSM, RegistrationFSM
 
-__all__ = ["AdminStates", "CooperationFSM"]
+__all__ = ["AdminStates", "CooperationFSM", "RegistrationFSM", "ProfileEditFSM"]

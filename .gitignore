@@ -1,6 +1,29 @@
-__pycache__/
-*.pyc
+# ── Secrets ──────────────────────────────
 .env
-data/
-venv/
+*.env
+!.env.example
+
+# ── Runtime ──────────────────────────────
+data/*
+!data/.gitkeep
+bot.log
 *.log
+nohup.out
+
+# ── Python ───────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# ── OS / IDE ─────────────────────────────
+.DS_Store
+.idea/
+.vscode/

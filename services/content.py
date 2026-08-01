@@ -93,11 +93,8 @@ async def set_channels(channels: list[dict]) -> None:
 
 
 def build_join_lock_text(channels: list[dict]) -> str:
-    return "\n".join([
-        'کاربر گرامی؛ برای استفاده از خدمات "قیومی‌بات | GhayoomiBot" باید عضو کانال‌های زیر باشید.',
-        "➖➖➖➖➖",
-        *[f'📣 {c["username"]} | "{c["title"]}"' for c in channels],
-    ])
+    """متن قفل جوین — از config خوانده می‌شود (کانال‌ها روی دکمه‌ها می‌آیند)."""
+    return config.START_JOIN_LOCK
 
 
 # ─────────────── دکمه‌های بالای منو (تبلیغاتی — چندتایی) ───────────────
