@@ -3,8 +3,12 @@
 #  GhayoomiBot — نصب خودکار روی سرور VPS (Ubuntu 22.04 / 24.04)
 #  سازنده: ARIAMIR — https://t.me/Ariamir_academy — https://ariamir.ir
 #
-#  اجرا (یک خط، با root):
-#  curl -fsSL https://raw.githubusercontent.com/Ghost87/Ghayoomibot/main/deploy/install.sh | sudo bash
+#  اجرای تعاملی (یک خط، با root):
+#    curl -fsSL https://raw.githubusercontent.com/Ghost87/Ghayoomibot/main/deploy/install.sh | sudo bash
+#
+#  اجرای غیرتعاملی (بدون سؤال، مناسب اجرا توسط پشتیبانی سرور):
+#    curl -fsSL https://raw.githubusercontent.com/Ghost87/Ghayoomibot/main/deploy/install.sh | sudo BOT_TOKEN='<token>' bash
+#    (اختیاری: ADMIN_USER_IDS / ADMIN_LOGIN / ADMIN_PASSWORD / ADMIN_GROUP_ID)
 # ============================================================================
 set -euo pipefail
 
@@ -46,37 +50,50 @@ python3 -m venv venv
 ./venv/bin/pip install -q -U pip
 ./venv/bin/pip install -q -r requirements.txt
 
-# ---------- 4) ساخت .env تعاملی ----------
+# ---------- 4) ساخت .env ----------
 ENV_FILE="$APP_DIR/.env"
+set_kv(){  # set_kv KEY VALUE
+  if grep -qE "^$1=" "$ENV_FILE"; then
+    sed -i -E "s|^$1=.*|$1=$2|" "$ENV_FILE"
+  else
+    echo "$1=$2" >> "$ENV_FILE"
+  fi
+}
+
 if [ ! -f "$ENV_FILE" ]; then
   [ -f .env.example ] && cp .env.example "$ENV_FILE" || : > "$ENV_FILE"
-  echo
-  warn "تنظیمات اولیه (.env) — برای هر مورد مقدار را تایپ و Enter بزنید"
-  exec </dev/tty || true
 
-  set_kv(){  # set_kv KEY VALUE
-    if grep -qE "^$1=" "$ENV_FILE"; then
-      sed -i -E "s|^$1=.*|$1=$2|" "$ENV_FILE"
-    else
-      echo "$1=$2" >> "$ENV_FILE"
-    fi
-  }
+  if [ -n "${BOT_TOKEN:-}" ]; then
+    # --- حالت غیرتعاملی: مقادیر از متغیرهای محیطی ---
+    say "حالت غیرتعاملی — تنظیمات از متغیرهای محیطی خوانده شد"
+    set_kv BOT_TOKEN "$BOT_TOKEN"
+    [ -n "${ADMIN_USER_IDS:-}" ] && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
+    [ -n "${ADMIN_LOGIN:-}" ]    && set_kv ADMIN_LOGIN "$ADMIN_LOGIN"
+    [ -n "${ADMIN_USERNAME:-}" ] && set_kv ADMIN_USERNAME "$ADMIN_USERNAME"
+    [ -n "${ADMIN_PASSWORD:-}" ] && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
+    [ -n "${ADMIN_GROUP_ID:-}" ] && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
+  else
+    # --- حالت تعاملی: سؤال از کاربر ---
+    echo
+    warn "تنظیمات اولیه (.env) — برای هر مورد مقدار را تایپ و Enter بزنید"
+    exec </dev/tty || true
 
-  BOT_TOKEN=""
-  while [ -z "$BOT_TOKEN" ]; do
-    read -rp "  🔑 توکن ربات (از BotFather): " BOT_TOKEN
-    case "$BOT_TOKEN" in *:*) : ;; *) warn "فرمت توکن معتبر نیست (باید شامل : باشد)"; BOT_TOKEN="";; esac
-  done
-  read -rp "  👑 آیدی عددی ادمین‌ها (با کاما — مثل: 8975757230): " ADMIN_USER_IDS
-  read -rp "  🧾 یوزرنیم ورود پنل /admin (مثل: ARIAdmin): " ADMIN_LOGIN
-  read -rp "  🔐 رمز ورود پنل /admin: " ADMIN_PASSWORD
-  read -rp "  👥 آیدی عددی گروه دریافت رزومه (الان ندارید؟ Enter — بعداً پر می‌شود): " ADMIN_GROUP_ID
+    BOT_TOKEN=""
+    while [ -z "$BOT_TOKEN" ]; do
+      read -rp "  🔑 توکن ربات (از BotFather): " BOT_TOKEN
+      case "$BOT_TOKEN" in *:*) : ;; *) warn "فرمت توکن معتبر نیست (باید شامل : باشد)"; BOT_TOKEN="";; esac
+    done
+    read -rp "  👑 آیدی عددی ادمین‌ها (با کاما — مثل: 8975757230): " ADMIN_USER_IDS
+    read -rp "  🧾 یوزرنیم ورود پنل /admin (مثل: ARIAdmin): " ADMIN_LOGIN
+    read -rp "  🔐 رمز ورود پنل /admin: " ADMIN_PASSWORD
+    read -rp "  👥 آیدی عددی گروه دریافت رزومه (الان ندارید؟ Enter — بعداً پر می‌شود): " ADMIN_GROUP_ID
 
-  set_kv BOT_TOKEN "$BOT_TOKEN"
-  [ -n "${ADMIN_USER_IDS:-}" ]  && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
-  [ -n "${ADMIN_LOGIN:-}" ]     && { set_kv ADMIN_USERNAME "$ADMIN_LOGIN" 2>/dev/null || true; set_kv ADMIN_LOGIN "$ADMIN_LOGIN" 2>/dev/null || true; }
-  [ -n "${ADMIN_PASSWORD:-}" ]  && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
-  [ -n "${ADMIN_GROUP_ID:-}" ]  && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
+    set_kv BOT_TOKEN "$BOT_TOKEN"
+    [ -n "${ADMIN_USER_IDS:-}" ] && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
+    [ -n "${ADMIN_LOGIN:-}" ]    && set_kv ADMIN_LOGIN "$ADMIN_LOGIN"
+    [ -n "${ADMIN_PASSWORD:-}" ] && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
+    [ -n "${ADMIN_GROUP_ID:-}" ] && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
+  fi
   say "فایل .env ساخته شد"
 else
   say ".env موجود است — بدون تغییر نگه داشته شد"
@@ -86,7 +103,7 @@ fi
 say "ساخت سرویس سیستمی (اجرا هنگام بوت + ری‌استارت خودکار)…"
 cat > /etc/systemd/system/$SERVICE.service <<UNIT
 [Unit]
-Description=GhayoomiBot Telegram Bot (ARIAMIR)
+Description=GhayoomiBot Telegram Bot
 After=network-online.target
 Wants=network-online.target
 
@@ -138,7 +155,7 @@ if [ "$STARTED" -eq 1 ]; then
   say "لاگ‌های زنده:"
   journalctl -u $SERVICE -n 12 --no-pager || true
   echo
-  say "🎉 نصب کامل شد!"
+  say "🎉 نصب کامل شد و ربات اجرا در حال کار است"
 else
   say "نصب بدون اجرا کامل شد"
 fi
