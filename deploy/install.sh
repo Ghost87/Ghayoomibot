@@ -60,40 +60,38 @@ set_kv(){  # set_kv KEY VALUE
   fi
 }
 
-if [ ! -f "$ENV_FILE" ]; then
+if [ -n "${BOT_TOKEN:-}" ]; then
+  # --- حالت غیرتعاملی: مقادیر از متغیرهای محیطی — همیشه روی .env اعمال می‌شود (حتی اگر از قبل وجود داشته باشد) ---
+  [ -f "$ENV_FILE" ] || { [ -f .env.example ] && cp .env.example "$ENV_FILE" || : > "$ENV_FILE"; }
+  say "حالت غیرتعاملی — تنظیمات روی .env اعمال/به‌روزرسانی شد"
+  set_kv BOT_TOKEN "$BOT_TOKEN"
+  [ -n "${ADMIN_USER_IDS:-}" ] && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
+  [ -n "${ADMIN_LOGIN:-}" ]    && set_kv ADMIN_LOGIN "$ADMIN_LOGIN"
+  [ -n "${ADMIN_USERNAME:-}" ] && set_kv ADMIN_USERNAME "$ADMIN_USERNAME"
+  [ -n "${ADMIN_PASSWORD:-}" ] && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
+  [ -n "${ADMIN_GROUP_ID:-}" ] && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
+elif [ ! -f "$ENV_FILE" ]; then
   [ -f .env.example ] && cp .env.example "$ENV_FILE" || : > "$ENV_FILE"
+  # --- حالت تعاملی: سؤال از کاربر ---
+  echo
+  warn "تنظیمات اولیه (.env) — برای هر مورد مقدار را تایپ و Enter بزنید"
+  exec </dev/tty || true
 
-  if [ -n "${BOT_TOKEN:-}" ]; then
-    # --- حالت غیرتعاملی: مقادیر از متغیرهای محیطی ---
-    say "حالت غیرتعاملی — تنظیمات از متغیرهای محیطی خوانده شد"
-    set_kv BOT_TOKEN "$BOT_TOKEN"
-    [ -n "${ADMIN_USER_IDS:-}" ] && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
-    [ -n "${ADMIN_LOGIN:-}" ]    && set_kv ADMIN_LOGIN "$ADMIN_LOGIN"
-    [ -n "${ADMIN_USERNAME:-}" ] && set_kv ADMIN_USERNAME "$ADMIN_USERNAME"
-    [ -n "${ADMIN_PASSWORD:-}" ] && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
-    [ -n "${ADMIN_GROUP_ID:-}" ] && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
-  else
-    # --- حالت تعاملی: سؤال از کاربر ---
-    echo
-    warn "تنظیمات اولیه (.env) — برای هر مورد مقدار را تایپ و Enter بزنید"
-    exec </dev/tty || true
+  BOT_TOKEN=""
+  while [ -z "$BOT_TOKEN" ]; do
+    read -rp "  🔑 توکن ربات (از BotFather): " BOT_TOKEN
+    case "$BOT_TOKEN" in *:*) : ;; *) warn "فرمت توکن معتبر نیست (باید شامل : باشد)"; BOT_TOKEN="";; esac
+  done
+  read -rp "  👑 آیدی عددی ادمین‌ها (با کاما — مثل: 8975757230): " ADMIN_USER_IDS
+  read -rp "  🧾 یوزرنیم ورود پنل /admin (مثل: ARIAdmin): " ADMIN_LOGIN
+  read -rp "  🔐 رمز ورود پنل /admin: " ADMIN_PASSWORD
+  read -rp "  👥 آیدی عددی گروه دریافت رزومه (الان ندارید؟ Enter — بعداً پر می‌شود): " ADMIN_GROUP_ID
 
-    BOT_TOKEN=""
-    while [ -z "$BOT_TOKEN" ]; do
-      read -rp "  🔑 توکن ربات (از BotFather): " BOT_TOKEN
-      case "$BOT_TOKEN" in *:*) : ;; *) warn "فرمت توکن معتبر نیست (باید شامل : باشد)"; BOT_TOKEN="";; esac
-    done
-    read -rp "  👑 آیدی عددی ادمین‌ها (با کاما — مثل: 8975757230): " ADMIN_USER_IDS
-    read -rp "  🧾 یوزرنیم ورود پنل /admin (مثل: ARIAdmin): " ADMIN_LOGIN
-    read -rp "  🔐 رمز ورود پنل /admin: " ADMIN_PASSWORD
-    read -rp "  👥 آیدی عددی گروه دریافت رزومه (الان ندارید؟ Enter — بعداً پر می‌شود): " ADMIN_GROUP_ID
-
-    set_kv BOT_TOKEN "$BOT_TOKEN"
-    [ -n "${ADMIN_USER_IDS:-}" ] && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
-    [ -n "${ADMIN_LOGIN:-}" ]    && set_kv ADMIN_LOGIN "$ADMIN_LOGIN"
-    [ -n "${ADMIN_PASSWORD:-}" ] && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
-    [ -n "${ADMIN_GROUP_ID:-}" ] && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
-  fi
+  set_kv BOT_TOKEN "$BOT_TOKEN"
+  [ -n "${ADMIN_USER_IDS:-}" ] && set_kv ADMIN_USER_IDS "$ADMIN_USER_IDS"
+  [ -n "${ADMIN_LOGIN:-}" ]    && set_kv ADMIN_LOGIN "$ADMIN_LOGIN"
+  [ -n "${ADMIN_PASSWORD:-}" ] && set_kv ADMIN_PASSWORD "$ADMIN_PASSWORD"
+  [ -n "${ADMIN_GROUP_ID:-}" ] && set_kv ADMIN_GROUP_ID "$ADMIN_GROUP_ID"
   say "فایل .env ساخته شد"
 else
   say ".env موجود است — بدون تغییر نگه داشته شد"
