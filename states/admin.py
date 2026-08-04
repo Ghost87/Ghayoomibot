@@ -21,9 +21,11 @@ class AdminStates(StatesGroup):
     channel_add_username = State()
     channel_add_title = State()
     channel_add_button = State()
+    channel_add_link = State()
     channel_edit_title = State()
     channel_edit_username = State()
     channel_edit_button = State()
+    channel_edit_link = State()
 
     # ── دکمه‌های بالای منو (تبلیغاتی) ──
     promo_edit_btn_text = State()

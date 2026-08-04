@@ -693,12 +693,16 @@ async def _show_channel_item(cb: CallbackQuery, idx: int) -> None:
         await cb.answer("⚠️ کانال پیدا نشد.", show_alert=True)
         return
     ch = channels[idx]
-    text = "\n".join([
+    is_private = str(ch["username"]).startswith("-")
+    lines = [
         f"📣 کانال: {ch['title']}",
         SEP,
-        f"🔗 یوزرنیم: {ch['username']}",
+        f"🔗 شناسه: {ch['username']}" + ("  🔒 پرایوت" if is_private else "  🌐 عمومی"),
         f"🔘 متن دکمه: {ch['button']}",
-    ])
+    ]
+    if ch.get("url"):
+        lines.append(f"🔗 لینک دعوت: {ch['url']}")
+    text = "\n".join(lines)
     await _edit(cb, text, akb.channel_item_kb(idx))
 
 
@@ -742,7 +746,7 @@ async def cb_channel_edit_title(cb: CallbackQuery, state: FSMContext) -> None:
 async def cb_channel_edit_username(cb: CallbackQuery, state: FSMContext) -> None:
     if not await _guard(cb):
         return
-    await _channel_edit_prompt(cb, state, AdminStates.channel_edit_username, "🔗 ویرایش یوزرنیم کانال (با @)", "username", "@MyChannel")
+    await _channel_edit_prompt(cb, state, AdminStates.channel_edit_username, "🔗 ویرایش شناسه کانال ( @username برای عمومی / آیدی عددی -100... برای پرایوت)", "username", "@MyChannel یا -1001234567890")
 
 
 @router.callback_query(F.data.startswith("ap:ch:eb:"))
@@ -779,8 +783,24 @@ async def channel_title_save(message: Message, state: FSMContext) -> None:
 async def channel_username_save(message: Message, state: FSMContext) -> None:
     await _channel_edit_save(
         message, state, "username",
-        validator=lambda v: v.startswith("@"),
-        err="⚠️ یوزرنیم باید با @ شروع شود!",
+        validator=_validate_channel_ref,
+        err="⚠️ فقط «یوزرنیم با @» (عمومی) یا «آیدی عددی -100...» (پرایوت)!",
+    )
+
+
+@router.callback_query(F.data.startswith("ap:ch:el:"))
+async def cb_channel_edit_link(cb: CallbackQuery, state: FSMContext) -> None:
+    if not await _guard(cb):
+        return
+    await _channel_edit_prompt(cb, state, AdminStates.channel_edit_link, "🌐 ویرایش لینک دعوت (برای کانال پرایوت)", "url", "https://t.me/+AbCdEfGh")
+
+
+@router.message(AdminStates.channel_edit_link, F.text)
+async def channel_link_save(message: Message, state: FSMContext) -> None:
+    await _channel_edit_save(
+        message, state, "url",
+        validator=lambda v: v.startswith(("http://", "https://")),
+        err="⚠️ لینک باید با https:// شروع شود!",
     )
 
 
@@ -815,12 +835,48 @@ async def cb_channel_delete_ok(cb: CallbackQuery) -> None:
     await _show_channels(cb)
 
 
+def _validate_channel_ref(text: str) -> str | None:
+    """@username (عمومی) یا آیدی عددی -100... (پرایوت) → مقدار معتبر؛ وگرنه None."""
+    t = text.strip()
+    if _is_invite_link(t):
+        return None
+    if t.startswith("@") and len(t) > 1:
+        return t
+    if t.startswith("-") and t[1:].isdigit():
+        return t
+    return None
+
+
+def _is_invite_link(text: str) -> bool:
+    t = text.strip()
+    return "t.me/+" in t or "joinchat" in t or t.lstrip("@").startswith("+")
+
+
+async def _chat_probe(message: Message, channel: dict) -> str:
+    """هشدار دسترسی ربات به کانال بعد از ثبت (فقط اطلاع‌رسانی، بلاک نمی‌کند)."""
+    try:
+        from services.check_membership import resolve_chat_ref
+
+        chat = await message.bot.get_chat(resolve_chat_ref(channel))
+        me = await message.bot.get_chat_member(chat.id, message.bot.id)
+        if me.status in ("administrator", "creator"):
+            return "🟢 ربات ادمین کاناله ✅ (بررسی عضویت کار می‌کنه)"
+        return "🟡 ربات کانال رو می‌بینه ولی ادمین نیست — برای کانال پرایوت حتماً ادمینش کن."
+    except Exception:
+        return "🔴 ربات این کانال رو نمی‌بینه! شناسه رو چک کن و ربات رو عضو/ادمین کانال کن."
+
+
 @router.callback_query(F.data == "ap:ch:add")
 async def cb_channel_add(cb: CallbackQuery, state: FSMContext) -> None:
     if not await _guard(cb):
         return
     await state.set_state(AdminStates.channel_add_username)
-    await _edit(cb, "➕ افزودن کانال — مرحله ۱ از ۳\n" + SEP + "\nیوزرنیم کانال را بفرست (مثل @MyChannel):", akb.cancel_kb("ch"))
+    await _edit(cb, (
+        "➕ افزودن کانال — مرحله ۱ از ۳\n" + SEP + "\n"
+        "شناسه کانال را بفرست:\n"
+        "• کانال عمومی → یوزرنیم با @ (مثل @MyChannel)\n"
+        "• کانال پرایوت → آیدی عددی (مثل -1001234567890)"
+    ), akb.cancel_kb("ch"))
     await cb.answer()
 
 
@@ -829,10 +885,21 @@ async def channel_add_username(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         return
     uname = message.text.strip()
-    if not uname.startswith("@"):
-        await message.answer("⚠️ یوزرنیم باید با @ شروع شود! دوباره بفرست:")
+    if _is_invite_link(uname):
+        await message.answer(
+            "⚠️ لینک دعوت (t.me/+...) برای بررسی عضویت کار نمی‌کنه!\n"
+            "برای کانال پرایوت باید «آیدی عددی» کانال رو بفرستی (مثل -1001234567890).\n"
+            "💡 پیداش کردن: توی تلگرام وب (web.telegram.org) کانال رو باز کن — عدد بعد از # توی آدرس همونه؛ "
+            "اگه با -100 شروع نشد، خودت -100 رو اولش بذار.\n"
+            "(لینک دعوت رو نگه دار؛ مرحله آخر لازمش داریم)\n\n"
+            "دوباره بفرست:"
+        )
         return
-    await state.update_data(new_ch_username=uname)
+    ref = _validate_channel_ref(uname)
+    if not ref:
+        await message.answer("⚠️ فقط «یوزرنیم با @» (عمومی) یا «آیدی عددی -100...» (پرایوت) قبوله! دوباره بفرست:")
+        return
+    await state.update_data(new_ch_username=ref, new_ch_private=ref.startswith("-"))
     await state.set_state(AdminStates.channel_add_title)
     await message.answer("➕ مرحله ۲ از ۳\nعنوان کانال را بفرست (مثل: آکادمی آریامیر):")
 
@@ -850,16 +917,44 @@ async def channel_add_title(message: Message, state: FSMContext) -> None:
 async def channel_add_button(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         return
+    await state.update_data(new_ch_button=message.text.strip())
+    if (await state.get_data()).get("new_ch_private"):
+        await state.set_state(AdminStates.channel_add_link)
+        await message.answer(
+            "➕ مرحله آخر (کانال پرایوت)\n"
+            "«لینک دعوت» کانال رو بفرست (مثل https://t.me/+AbCdEf...) تا دکمه عضویت کاربرا به اون وصل بشه:"
+        )
+        return
+    await _channel_add_finish(message, state)
+
+
+@router.message(AdminStates.channel_add_link, F.text)
+async def channel_add_link(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    url = message.text.strip()
+    if not url.startswith(("http://", "https://")):
+        await message.answer("⚠️ لینک معتبر نیست! باید با https:// شروع بشه. دوباره بفرست:")
+        return
+    await state.update_data(new_ch_url=url)
+    await _channel_add_finish(message, state)
+
+
+async def _channel_add_finish(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
-    channels = await content.get_channels()
-    channels.append({
+    new_ch = {
         "username": data["new_ch_username"],
         "title": data["new_ch_title"],
-        "button": message.text.strip(),
-    })
+        "button": data["new_ch_button"],
+    }
+    if data.get("new_ch_url"):
+        new_ch["url"] = data["new_ch_url"]
+    channels = await content.get_channels()
+    channels.append(new_ch)
     await content.set_channels(channels)
-    await message.answer(f"✅ کانال «{data['new_ch_title']}» اضافه شد!", reply_markup=akb.back_kb("ch"))
+    probe = await _chat_probe(message, new_ch)
+    await message.answer(f"✅ کانال «{data['new_ch_title']}» اضافه شد!\n{probe}", reply_markup=akb.back_kb("ch"))
 
 
 # ════════════════════════ 🎁 دکمه‌های بالای منو ════════════════════════

@@ -172,11 +172,12 @@ def channels_kb(channels: list[dict]) -> InlineKeyboardMarkup:
 def channel_item_kb(idx: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="✏️ ویرایش عنوان", callback_data=f"ap:ch:et:{idx}", style="primary")
-    kb.button(text="🔗 ویرایش یوزرنیم", callback_data=f"ap:ch:eu:{idx}", style="primary")
+    kb.button(text="🔗 ویرایش شناسه (@ یا -100...)", callback_data=f"ap:ch:eu:{idx}", style="primary")
     kb.button(text="🖊 ویرایش متن دکمه", callback_data=f"ap:ch:eb:{idx}", style="primary")
+    kb.button(text="🌐 ویرایش لینک دعوت (پرایوت)", callback_data=f"ap:ch:el:{idx}", style="primary")
     kb.button(text="🗑 حذف کانال", callback_data=f"ap:ch:d:{idx}", style="danger")
     kb.button(text=BACK_TEXT, callback_data="ap:ch")
-    kb.adjust(1, 1, 1, 1, 1)
+    kb.adjust(1, 1, 1, 1, 1, 1)
     return kb.as_markup()
 
 
