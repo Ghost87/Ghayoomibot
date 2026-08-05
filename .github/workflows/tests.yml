@@ -1,0 +1,38 @@
+name: 🧪 GhayoomiBot Tests
+
+on:
+  workflow_dispatch:        # دکمه «Run workflow» دستی
+  push:
+    branches:
+      - main                # CI خودکار بعد از هر پوش
+
+jobs:
+  tests:
+    name: اجرای تست‌ها
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 📥 دریافت کد
+        uses: actions/checkout@v4
+
+      - name: 🐍 پایتون 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 📦 نصب وابستگی‌ها
+        run: pip install -q --disable-pip-version-check -r requirements.txt
+
+      - name: 🔍 ممیزی جوین‌لاک (۳۶ کیس)
+        run: python tests/test_joinlock_audit.py
+
+      - name: 🔒 کانال پرایوت (۲۱ کیس)
+        run: python tests/test_private_channel_fix.py
+
+      - name: 📣 استرس همگانی ۳۰هزار (۱۲ کیس)
+        run: python tests/stress_broadcast_30k.py
+
+      - name: ✅ جمع‌بندی
+        if: success()
+        run: echo '🟢 همه‌ی تست‌ها PASS شدند — ربات آماده‌ی دیپلوی روی VPS است' >> "$GITHUB_STEP_SUMMARY"

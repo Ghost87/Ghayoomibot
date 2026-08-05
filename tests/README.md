@@ -27,3 +27,8 @@ cd /opt/Ghayoomibot
 | `test_joinlock_audit.py` | ورودی انعطاف‌پذیر کانال‌ها (@user, t.me/user, آیدی عددی)، رد لینک دعوت با راهنما، dedup، restricted member، فلوی دکمه «بررسی عضویت» (۳۶ کیس) |
 | `test_private_channel_fix.py` | کانال پرایوت با آیدی عددی -100... + لینک دعوت در دکمه عضویت (۲۱ کیس) |
 | `stress_broadcast_30k.py` | ارسال همگانی به ۳۰٬۰۰۰ کاربر — سقف ۲۵/ثانیه، 429+retry_after، بلاک‌شده‌ها، توقف میانی (۱۲ کیس) ~۱ دقیقه |
+
+## اجرای خودکار روی گیت‌هاب
+ورکفلوی `.github/workflows/tests.yml` همان سه تست را اجرا می‌کند:
+- **دستی:** تب Actions → «🧪 GhayoomiBot Tests» → دکمه «Run workflow» (شاخه main)
+- **خودکار:** بعد از هر push روی main
