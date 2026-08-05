@@ -28,13 +28,22 @@ def resolve_chat_ref(channel: dict) -> int | str:
     return ref
 
 
+def _is_joined(member) -> bool:
+    """عضو به حساب می‌آید؟ — restricted با is_member=True هم عضو واقعی است (سوپرگروه‌ها)."""
+    if member.status in JOINED_STATUSES:
+        return True
+    if member.status == "restricted" and getattr(member, "is_member", False):
+        return True
+    return False
+
+
 async def check_membership(bot: Bot, user_id: int, channels: list[dict] | None = None) -> bool:
     """True اگر کاربر عضو همه‌ی کانال‌های اجباری باشد."""
     for channel in (channels if channels is not None else REQUIRED_CHANNELS):
         ref = resolve_chat_ref(channel)
         try:
             member = await bot.get_chat_member(chat_id=ref, user_id=user_id)
-            if member.status not in JOINED_STATUSES:
+            if not _is_joined(member):
                 return False
         except Exception as exc:
             log.warning("membership check failed: user=%s channel=%s error=%s", user_id, ref, exc)
@@ -48,7 +57,7 @@ async def get_unjoined_channels(bot: Bot, user_id: int, channels: list[dict] | N
     for channel in (channels if channels is not None else REQUIRED_CHANNELS):
         try:
             member = await bot.get_chat_member(chat_id=resolve_chat_ref(channel), user_id=user_id)
-            if member.status not in JOINED_STATUSES:
+            if not _is_joined(member):
                 unjoined.append(channel)
         except Exception:
             unjoined.append(channel)

@@ -13,7 +13,7 @@ from handlers.registration import start_registration
 from keyboards.main_menu import main_menu_kb
 from services import content
 from services import db as database
-from services.check_membership import check_membership
+from services.check_membership import check_membership, get_unjoined_channels
 
 router = Router(name="start")
 
@@ -63,8 +63,14 @@ async def cmd_start(message: Message, bot: Bot, state: FSMContext) -> None:
 async def cb_check_join(callback: CallbackQuery, bot: Bot, state: FSMContext) -> None:
     """بررسی مجدد عضویت بعد از فشردن «✅ بررسی عضویت»."""
     channels = await content.get_channels()
-    if not await check_membership(bot, callback.from_user.id, channels):
+    unjoined = await get_unjoined_channels(bot, callback.from_user.id, channels)
+    if unjoined:
         await callback.answer(config.ALERT_NOT_JOINED, show_alert=True)
+        await edit_or_answer(
+            callback,
+            content.build_join_lock_text(unjoined),
+            reply_markup=join_lock_kb(unjoined),
+        )
         return
 
     await callback.answer(config.ALERT_JOINED_OK)

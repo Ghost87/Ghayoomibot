@@ -32,8 +32,15 @@ async def _welcome(message: Message) -> None:
 
 @router.message(StateFilter(None), F.text == BACK_BTN_TEXT)
 async def reply_back_to_main(message: Message, bot: Bot) -> None:
-    """دکمه ریپلای پایین صفحه → نمایش منوی اصلی."""
-    await _welcome(message)
+    """دکمه ریپلای پایین صفحه → نمایش منوی اصلی (با قفل جوین)."""
+    channels = await content.get_channels()
+    if await check_membership(bot, message.from_user.id, channels):
+        await _welcome(message)
+    else:
+        await message.answer(
+            content.build_join_lock_text(channels),
+            reply_markup=join_lock_kb(channels),
+        )
 
 
 @router.message(StateFilter(None))

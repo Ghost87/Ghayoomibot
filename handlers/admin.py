@@ -702,6 +702,8 @@ async def _show_channel_item(cb: CallbackQuery, idx: int) -> None:
     ]
     if ch.get("url"):
         lines.append(f"🔗 لینک دعوت: {ch['url']}")
+    elif is_private:
+        lines.append("⚠️ لینک دعوت ثبت نشده — کاربر نمی‌تونه عضو بشه! از «🌐 ویرایش لینک دعوت» ثبتش کن.")
     text = "\n".join(lines)
     await _edit(cb, text, akb.channel_item_kb(idx))
 
@@ -756,18 +758,21 @@ async def cb_channel_edit_button(cb: CallbackQuery, state: FSMContext) -> None:
     await _channel_edit_prompt(cb, state, AdminStates.channel_edit_button, "🖊 ویرایش متن دکمه عضویت", "button", "عضویت در کانال آریامیر")
 
 
-async def _channel_edit_save(message: Message, state: FSMContext, field: str, validator=None, err: str = "") -> None:
+async def _channel_edit_save(message: Message, state: FSMContext, field: str, validator=None, err: str = "", transform=None) -> None:
     if not is_admin(message.from_user.id):
         return
-    if validator and not validator(message.text.strip()):
+    value = message.text.strip()
+    if validator and not validator(value):
         await message.answer(err + " دوباره بفرست:")
         return
+    if transform:
+        value = transform(value)
     data = await state.get_data()
     await state.clear()
     channels = await content.get_channels()
     idx = data.get("ch_idx", -1)
     if 0 <= idx < len(channels):
-        channels[idx][field] = message.text.strip()
+        channels[idx][field] = value
         await content.set_channels(channels)
         await message.answer(f"✅ ذخیره شد: «{channels[idx][field]}»", reply_markup=akb.back_kb(f"ch:show:{idx}"))
     else:
@@ -783,8 +788,9 @@ async def channel_title_save(message: Message, state: FSMContext) -> None:
 async def channel_username_save(message: Message, state: FSMContext) -> None:
     await _channel_edit_save(
         message, state, "username",
-        validator=_validate_channel_ref,
-        err="⚠️ فقط «یوزرنیم با @» (عمومی) یا «آیدی عددی -100...» (پرایوت)!",
+        validator=lambda v: _normalize_channel_ref(v)[0] is not None,
+        err="⚠️ فقط «@username» یا «t.me/username» (عمومی) یا «آیدی عددی -100...» (پرایوت)!",
+        transform=lambda v: _normalize_channel_ref(v)[0],
     )
 
 
@@ -835,21 +841,42 @@ async def cb_channel_delete_ok(cb: CallbackQuery) -> None:
     await _show_channels(cb)
 
 
-def _validate_channel_ref(text: str) -> str | None:
-    """@username (عمومی) یا آیدی عددی -100... (پرایوت) → مقدار معتبر؛ وگرنه None."""
-    t = text.strip()
-    if _is_invite_link(t):
-        return None
-    if t.startswith("@") and len(t) > 1:
-        return t
-    if t.startswith("-") and t[1:].isdigit():
-        return t
-    return None
-
-
 def _is_invite_link(text: str) -> bool:
     t = text.strip()
-    return "t.me/+" in t or "joinchat" in t or t.lstrip("@").startswith("+")
+    return ("t.me/+" in t or "joinchat" in t or "t.me/c/" in t
+            or t.lstrip("@").startswith("+"))
+
+
+def _normalize_channel_ref(text: str) -> tuple[str | None, str | None]:
+    """هر فرمت رایج → مرجع نهایی (@username یا -100...) یا خطای راهنما.
+
+    خروجی: (ref, err) — همیشه فقط یکی پر است.
+    """
+    import re
+
+    t = text.strip()
+    if _is_invite_link(t):
+        return None, (
+            "⚠️ لینک دعوت (t.me/+...) برای بررسی عضویت کار نمی‌کنه!\n"
+            "برای کانال پرایوت «آیدی عددی» (-100...) لازمه؛ برای عمومی @username یا لینک t.me/username."
+        )
+    m = re.match(r"^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)/([A-Za-z0-9_]{5,32})/?$", t)
+    if m:
+        return "@" + m.group(1), None
+    if t.startswith("@"):
+        if re.fullmatch(r"[A-Za-z0-9_]{5,32}", t[1:]):
+            return t, None
+        return None, "⚠️ یوزرنیم معتبر نیست (۵ تا ۳۲ حرف/عدد/آندرلاین)."
+    if t.startswith("-") and t[1:].isdigit():
+        return t, None
+    if t.isdigit():
+        return None, "⚠️ اگه این آیدی عددی کانال پرایوته «-100» رو اولش بذار (مثل -1001234567890)."
+    return None, "⚠️ فرمت درست نیست! عمومی → @username یا t.me/username ؛ پرایوت → آیدی عددی -100..."
+
+
+def _validate_channel_ref(text: str) -> str | None:
+    """ولیدیتور ساده: مرجع نرمال‌شده یا None (بدون پیام خطا)."""
+    return _normalize_channel_ref(text)[0]
 
 
 async def _chat_probe(message: Message, channel: dict) -> str:
@@ -866,6 +893,12 @@ async def _chat_probe(message: Message, channel: dict) -> str:
         return "🔴 ربات این کانال رو نمی‌بینه! شناسه رو چک کن و ربات رو عضو/ادمین کانال کن."
 
 
+def _find_channel_dup(channels: list[dict], ref: str) -> bool:
+    """کانال تکراری؟ (یوزرنیم‌ها بدون حساسیت به بزرگ/کوچک)"""
+    r = str(ref).lower()
+    return any(str(c.get("username", "")).lower() == r for c in channels)
+
+
 @router.callback_query(F.data == "ap:ch:add")
 async def cb_channel_add(cb: CallbackQuery, state: FSMContext) -> None:
     if not await _guard(cb):
@@ -874,7 +907,7 @@ async def cb_channel_add(cb: CallbackQuery, state: FSMContext) -> None:
     await _edit(cb, (
         "➕ افزودن کانال — مرحله ۱ از ۳\n" + SEP + "\n"
         "شناسه کانال را بفرست:\n"
-        "• کانال عمومی → یوزرنیم با @ (مثل @MyChannel)\n"
+        "• کانال عمومی → یوزرنیم یا لینک (مثل @MyChannel یا https://t.me/MyChannel)\n"
         "• کانال پرایوت → آیدی عددی (مثل -1001234567890)"
     ), akb.cancel_kb("ch"))
     await cb.answer()
@@ -884,20 +917,13 @@ async def cb_channel_add(cb: CallbackQuery, state: FSMContext) -> None:
 async def channel_add_username(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
         return
-    uname = message.text.strip()
-    if _is_invite_link(uname):
-        await message.answer(
-            "⚠️ لینک دعوت (t.me/+...) برای بررسی عضویت کار نمی‌کنه!\n"
-            "برای کانال پرایوت باید «آیدی عددی» کانال رو بفرستی (مثل -1001234567890).\n"
-            "💡 پیداش کردن: توی تلگرام وب (web.telegram.org) کانال رو باز کن — عدد بعد از # توی آدرس همونه؛ "
-            "اگه با -100 شروع نشد، خودت -100 رو اولش بذار.\n"
-            "(لینک دعوت رو نگه دار؛ مرحله آخر لازمش داریم)\n\n"
-            "دوباره بفرست:"
-        )
-        return
-    ref = _validate_channel_ref(uname)
-    if not ref:
-        await message.answer("⚠️ فقط «یوزرنیم با @» (عمومی) یا «آیدی عددی -100...» (پرایوت) قبوله! دوباره بفرست:")
+    ref, err = _normalize_channel_ref(message.text)
+    if err:
+        hint = ""
+        if _is_invite_link(message.text):
+            hint = ("\n💡 پیدا کردن آیدی عددی: توی تلگرام وب (web.telegram.org) کانال رو باز کن — عدد بعد از # توی آدرس همونه؛ "
+                    "اگه با -100 شروع نشد، خودت -100 رو اولش بذار.\n(لینک دعوت رو نگه دار؛ مرحله آخر لازمش داریم)")
+        await message.answer(err + hint + "\n\nدوباره بفرست:")
         return
     await state.update_data(new_ch_username=ref, new_ch_private=ref.startswith("-"))
     await state.set_state(AdminStates.channel_add_title)
@@ -951,6 +977,12 @@ async def _channel_add_finish(message: Message, state: FSMContext) -> None:
     if data.get("new_ch_url"):
         new_ch["url"] = data["new_ch_url"]
     channels = await content.get_channels()
+    if _find_channel_dup(channels, new_ch["username"]):
+        await message.answer(
+            f"⚠️ کانال «{new_ch['username']}» قبلاً اضافه شده!",
+            reply_markup=akb.back_kb("ch"),
+        )
+        return
     channels.append(new_ch)
     await content.set_channels(channels)
     probe = await _chat_probe(message, new_ch)
